@@ -53,6 +53,8 @@ function copyPath() {
   void navigator.clipboard?.writeText(activePath.value).catch(() => {})
   notice.value = '已复制路径'
 }
+
+defineExpose({ openSheet })
 </script>
 
 <template>

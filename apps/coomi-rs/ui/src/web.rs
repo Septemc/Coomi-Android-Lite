@@ -50,7 +50,6 @@ use coomi_services::ProviderDocument;
 use coomi_services::ProviderRegistry;
 use coomi_services::ProviderSettings;
 use coomi_services::list_installed_skills;
-use coomi_telemetry::Telemetry;
 use coomi_tools::AgentScheduler;
 use coomi_tools::CoreTools;
 use coomi_tools::ProcessManager;
@@ -599,8 +598,6 @@ pub async fn serve(
         registry_cache: Arc::new(StdMutex::new(registry_cache)),
     };
     refresh_registry_cache_background(state.clone());
-    // 引擎启动时补发上次会话遗留的未上报事件（如进程被系统杀掉前没来得及 flush）。
-    Telemetry::new(&state.home).flush_background();
     let index = static_dir.join("index.html");
     let files = ServeDir::new(static_dir).not_found_service(ServeFile::new(index));
     let app = Router::new()
@@ -617,6 +614,10 @@ pub async fn serve(
         .route(
             "/api/settings/connection",
             get(get_connection_settings).put(set_connection_settings),
+        )
+        .route(
+            "/api/settings/subagents",
+            get(get_subagents).put(set_subagents),
         )
         .route("/api/runtime/hooks", get(get_hooks).put(set_hooks))
         .route("/api/memory", get(list_memory).post(create_memory))
@@ -669,10 +670,6 @@ pub async fn serve(
         )
         .route("/api/registry", get(registry_index))
         .route("/api/registry/refresh", post(refresh_registry))
-        .route(
-            "/api/settings/telemetry",
-            get(telemetry_get).put(telemetry_set),
-        )
         .route("/api/runtime/installed", get(runtime_installed))
         .route(
             "/api/tool-failure-analysis",
@@ -965,6 +962,40 @@ async fn set_connection_settings(
     settings["reconnect_max_delay_ms"] = json!(body.reconnect_max_delay_ms);
     write_settings(&state.home, &settings)?;
     Ok(Json(body))
+}
+
+/// 子代理配置：命名 Profile + 默认 Profile。只暴露已有名词“子代理”。
+async fn get_subagents(State(state): State<AppState>) -> Json<Value> {
+    let document =
+        coomi_services::SubAgentDocument::from_settings(&read_settings(&state.home))
+            .unwrap_or_default();
+    Json(json!({
+        "default": document.default,
+        "agents": document.agents,
+    }))
+}
+
+async fn set_subagents(
+    State(state): State<AppState>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let registry = ProviderRegistry::load(&providers_path(&state.home))
+        .map_err(|error| ApiError::bad_request(format!("configure a provider first: {error:#}")))?;
+    let document: coomi_services::SubAgentDocument = serde_json::from_value(body)
+        .map_err(|error| ApiError::bad_request(format!("invalid sub-agent settings: {error}")))?;
+    document
+        .validate(&registry)
+        .map_err(|error| ApiError::bad_request(format!("{error:#}")))?;
+    let response = json!({
+        "default": document.default.clone(),
+        "agents": document.agents.clone(),
+    });
+    let mut settings = read_settings(&state.home);
+    settings["subagent_default"] = json!(document.default);
+    settings["subagents"] = serde_json::to_value(&document.agents)
+        .map_err(|error| ApiError::internal(format!("failed to serialize sub-agents: {error}")))?;
+    write_settings(&state.home, &settings)?;
+    Ok(Json(response))
 }
 
 /// 定制身份提示词的最大长度（字符）。防止超大文本挤占每次对话的上下文。
@@ -2225,30 +2256,6 @@ async fn fetch_first(urls: &[String]) -> Option<Value> {
         }
     }
     None
-}
-
-// ─────────────────────────── 匿名统计设置 ───────────────────────────
-
-/// 匿名使用统计开关状态。
-async fn telemetry_get(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    let telemetry = Telemetry::new(&state.home);
-    Ok(Json(json!({ "enabled": telemetry.enabled() })))
-}
-
-/// 设置匿名使用统计开关：{ "enabled": true|false }。
-/// 关闭后立即停止缓冲与上报；再次开启后重新开始统计。
-async fn telemetry_set(
-    State(state): State<AppState>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, ApiError> {
-    let enabled = body
-        .get("enabled")
-        .and_then(Value::as_bool)
-        .ok_or_else(|| ApiError::bad_request("missing enabled: true|false"))?;
-    Telemetry::new(&state.home)
-        .set_enabled(enabled)
-        .map_err(|e| ApiError::internal(format!("failed to save telemetry setting: {e:#}")))?;
-    Ok(Json(json!({ "ok": true, "enabled": enabled })))
 }
 
 /// 停用/启用 MCP server：{ "enabled": true|false }。
@@ -3615,6 +3622,21 @@ async fn run_turn(
         })
     });
     let provider_config = registry.resolve(selector)?;
+    // Sub-agent profiles are optional. A broken profile must not block the main
+    // chat, so invalid settings fall back to "no dedicated profiles".
+    let (subagent_profiles, subagent_default) =
+        match coomi_services::SubAgentDocument::from_settings(&read_settings(&state.home))
+            .and_then(|document| {
+                let profiles = document.resolve_all(&registry)?;
+                let default = document.default.trim().to_owned();
+                Ok((profiles, (!default.is_empty()).then_some(default)))
+            }) {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!("[subagents] ignoring invalid settings: {error:#}");
+                (Vec::new(), None)
+            }
+        };
     let mut session = load_or_create_web_session(
         &store,
         requested_id,
@@ -3674,6 +3696,7 @@ async fn run_turn(
         policy_mode,
         prompt_context.clone(),
     )
+    .with_profiles(subagent_profiles, subagent_default)
     .without_persistent_memory();
     let tools = CoreTools::new(cwd.clone(), policy)
         .with_skills_directory(state.home.join("skills"))

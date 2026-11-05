@@ -25,7 +25,6 @@ use coomi_services::MemoryManager;
 use coomi_services::MemoryScope;
 use coomi_services::MemoryType;
 use coomi_services::apply_auto_config;
-use coomi_telemetry::Telemetry;
 use ignore::WalkBuilder;
 use regex::Regex;
 use serde::Deserialize;
@@ -59,6 +58,7 @@ pub struct CoreTools {
     memory: Option<Arc<MemoryManager>>,
     hooks: Option<Arc<HookRunner>>,
     parent_history: Vec<coomi_engine::ChatMessage>,
+    allowed_tools: Option<Vec<String>>,
 }
 
 impl CoreTools {
@@ -77,6 +77,7 @@ impl CoreTools {
             memory: None,
             hooks: None,
             parent_history: Vec::new(),
+            allowed_tools: None,
         }
     }
 
@@ -87,6 +88,15 @@ impl CoreTools {
     ) -> Self {
         self.agent_scheduler = Some(scheduler);
         self.parent_history = parent_history;
+        self
+    }
+
+    /// Restricts the tool set to an explicit allow-list. An empty list keeps
+    /// the full set, so callers can pass a profile's `tools` verbatim.
+    pub fn with_allowed_tools(mut self, tools: Vec<String>) -> Self {
+        if !tools.is_empty() {
+            self.allowed_tools = Some(tools);
+        }
         self
     }
 
@@ -348,8 +358,14 @@ impl CoreTools {
             return ToolResult::error("missing string argument: task");
         };
         let fork_turns = string_arg(arguments, "fork_turns");
+        let agent_id = string_arg(arguments, "agent_id");
         match scheduler
-            .spawn(task.to_owned(), &self.parent_history, fork_turns)
+            .spawn(
+                task.to_owned(),
+                &self.parent_history,
+                fork_turns,
+                agent_id,
+            )
             .await
         {
             Ok(id) => ToolResult::success(format!("agent_id: {id}")),
@@ -1033,38 +1049,9 @@ impl CoreTools {
             }
         };
         match tokio::fs::read_to_string(&canonical).await {
-            Ok(content) => {
-                // 匿名使用统计：skill 首次被读取（使用）时上报一次 first_use。
-                // 统计 id 从 skills.json 元数据推导（catalog -> id，github -> owner/repo），
-                // 与安装事件同维度，Agent 驱动的使用与用户手动使用都能覆盖。
-                if let Some(home) = directory.parent() {
-                    let telemetry = Telemetry::new(home);
-                    let stat_id = telemetry
-                        .mark_first_use(name)
-                        .then(|| self.installed_stat_id(home, name))
-                        .flatten();
-                    if let Some(stat_id) = stat_id {
-                        let _ = telemetry.record("first_use", &stat_id);
-                    }
-                }
-                ToolResult::success(self.truncate(content))
-            }
+            Ok(content) => ToolResult::success(self.truncate(content)),
             Err(error) => ToolResult::error(format!("failed to read Skill `{name}`: {error}")),
         }
-    }
-
-    /// 已安装 skill 的统计 id：读 config/skills.json 元数据推导；
-    /// 未知来源（本地目录等）退回目录名。
-    fn installed_stat_id(&self, home: &std::path::Path, name: &str) -> Option<String> {
-        let bytes = std::fs::read(home.join("config").join("skills.json")).ok()?;
-        let document: Value = serde_json::from_slice(&bytes).ok()?;
-        let record = document.get("skills")?.get(name)?;
-        let stat_id = record
-            .get("source_type")
-            .and_then(Value::as_str)
-            .zip(record.get("source").and_then(Value::as_str))
-            .and_then(|(source_type, source)| coomi_telemetry::stat_id_for(source_type, source));
-        stat_id.or_else(|| coomi_telemetry::normalize_skill_id(name))
     }
 
     fn skill_is_enabled(&self, name: &str) -> bool {
@@ -1949,12 +1936,19 @@ impl ToolRuntime for CoreTools {
             specs.extend([
                 ToolSpec {
                     name: "spawn_agent".into(),
-                    description: "Spawn a background Coomi sub-agent with an optional fork of parent history.".into(),
+                    description: format!(
+                        "Spawn a background Coomi sub-agent with an optional fork of parent history. {}",
+                        self.agent_scheduler
+                            .as_ref()
+                            .map(|scheduler| scheduler.sub_agent_summary())
+                            .unwrap_or_default()
+                    ),
                     parameters: json!({
                         "type": "object",
                         "properties": {
                             "task": {"type": "string"},
-                            "fork_turns": {"type": "string", "description": "none, all, or a positive integer"}
+                            "fork_turns": {"type": "string", "description": "none, all, or a positive integer"},
+                            "agent_id": {"type": "string", "description": "Optional configured sub-agent profile id; omit to use the default/main model"}
                         },
                         "required": ["task"],
                         "additionalProperties": false
@@ -1991,10 +1985,28 @@ impl ToolRuntime for CoreTools {
         if self.memory.is_some() {
             specs.extend(memory_specs());
         }
+        if let Some(allowed) = &self.allowed_tools {
+            specs.retain(|spec| {
+                allowed
+                    .iter()
+                    .any(|candidate| candidate.eq_ignore_ascii_case(&spec.name))
+            });
+        }
         specs
     }
 
     async fn call(&self, call: &ToolCall, approval: &dyn ApprovalHandler) -> ToolResult {
+        if let Some(allowed) = &self.allowed_tools {
+            let name = Self::canonical_tool_name(call.name.as_str());
+            if !allowed
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(name))
+            {
+                return ToolResult::error(format!(
+                    "tool `{name}` is not enabled for this sub-agent"
+                ));
+            }
+        }
         let mut effective_call = call.clone();
         let mut additional_context = String::new();
         if let Some(hooks) = &self.hooks {
@@ -2520,6 +2532,52 @@ mod tests {
             .await;
         assert!(result.success);
         assert_eq!(std::fs::read_to_string(file).expect("read result"), "after");
+    }
+
+    #[tokio::test]
+    async fn allowed_tools_restrict_specs_and_calls() {
+        let workspace = tempfile::tempdir().expect("temporary workspace");
+        let policy =
+            SecurityPolicy::new(workspace.path(), AccessMode::ReadOnly).expect("security policy");
+        let tools = CoreTools::new(workspace.path().to_path_buf(), policy)
+            .with_allowed_tools(vec!["read_file".into(), "grep_files".into()]);
+        let specs = tools.specs();
+        assert!(!specs.is_empty());
+        assert!(
+            specs
+                .iter()
+                .all(|spec| matches!(spec.name.as_str(), "read_file" | "grep_files"))
+        );
+        let result = tools
+            .call(
+                &ToolCall {
+                    id: "1".into(),
+                    name: "write_file".into(),
+                    arguments: json!({"path": "x.txt", "content": "y"}),
+                },
+                &Deny,
+            )
+            .await;
+        assert!(!result.success);
+        assert!(result.output.contains("not enabled"));
+    }
+
+    #[test]
+    fn snapshot_json_exposes_subagent_profile_and_model() {
+        let snapshot = crate::agents::AgentSnapshot {
+            id: "1".into(),
+            status: "running".into(),
+            task: "review".into(),
+            output: String::new(),
+            elapsed_ms: 0,
+            profile_id: "reviewer".into(),
+            profile_name: "审查".into(),
+            model: "review-model".into(),
+        };
+        let value = snapshots_json(&[snapshot]);
+        assert_eq!(value[0]["profile_id"], "reviewer");
+        assert_eq!(value[0]["profile_name"], "审查");
+        assert_eq!(value[0]["model"], "review-model");
     }
 
     #[tokio::test]

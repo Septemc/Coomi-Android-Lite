@@ -4,6 +4,7 @@ mod config;
 mod mcp;
 mod memory;
 mod provider;
+mod subagents;
 mod update;
 
 pub use auto_config::AutoConfigIntent;
@@ -34,5 +35,10 @@ pub use memory::MemoryManager;
 pub use memory::MemoryScope;
 pub use memory::MemoryType;
 pub use provider::HttpModelProvider;
+pub use subagents::MAX_SUB_AGENT_PARALLEL;
+pub use subagents::MAX_SUB_AGENTS;
+pub use subagents::ResolvedSubAgent;
+pub use subagents::SubAgentDocument;
+pub use subagents::SubAgentProfile;
 pub use update::UpdateCheckResult;
 pub use update::check_for_update;

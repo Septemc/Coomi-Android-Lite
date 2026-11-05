@@ -9,7 +9,6 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
-coomi-telemetry = { path = "../telemetry" }
 serde.workspace = true
 serde_json.workspace = true
 reqwest.workspace = true

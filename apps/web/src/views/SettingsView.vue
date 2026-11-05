@@ -9,7 +9,6 @@ import { useConfigStore, DEFAULT_CONNECTION_SETTINGS, PERMISSION_MODES, REASONIN
 import { useSessionStore } from '@/stores/session'
 import { useSessionsStore } from '@/stores/sessions'
 import { useConnectionStore } from '@/stores/connection'
-import { authedFetch } from '@/bridge/http'
 import type { PermissionMode } from '@/protocol/commands'
 import PageHead from '@/components/PageHead.vue'
 import CoomiIcon from '@/components/CoomiIcon.vue'
@@ -87,25 +86,6 @@ async function toggleGlobalMemory() {
   }
 }
 
-/** 匿名使用统计开关：仅上报 SKILL 安装/使用次数，不含任何内容。 */
-const telemetryEnabled = ref(true)
-const telemetryError = ref('')
-async function toggleTelemetry() {
-  telemetryError.value = ''
-  try {
-    const res = await authedFetch('/api/settings/telemetry', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled: !telemetryEnabled.value }),
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
-    telemetryEnabled.value = data.enabled ?? !telemetryEnabled.value
-  } catch (e) {
-    telemetryError.value = `设置失败：${e instanceof Error ? e.message : String(e)}`
-  }
-}
-
 const MODE_ICON: Record<PermissionMode, string> = { ask: 'shield', auto: 'bolt', full: 'plusCircle' }
 
 /** provider × model 拍平成一维列表，省掉一层嵌套标题。 */
@@ -119,7 +99,7 @@ function isCurrent(providerId: string, model: string): boolean {
   return config.currentProviderId === providerId && config.currentModel === model
 }
 
-/** 进入设置页时拉取定制提示词与统计开关状态（旧引擎无统计接口时保持默认）。 */
+/** 进入设置页时拉取定制身份定位。 */
 onMounted(async () => {
   window.addEventListener('coomi:appearance-changed', syncCustomAppearance)
   void config.fetchCustomPrompt()
@@ -128,13 +108,6 @@ onMounted(async () => {
     reconnectInitialSeconds.value = config.connectionSettings.reconnectInitialDelayMs / 1000
     reconnectMaxSeconds.value = config.connectionSettings.reconnectMaxDelayMs / 1000
   }
-  try {
-    const res = await authedFetch('/api/settings/telemetry')
-    if (res.ok) {
-      const data = await res.json()
-      telemetryEnabled.value = data.enabled ?? true
-    }
-  } catch { /* 旧引擎进程：接口不存在，保持默认开启 */ }
 })
 
 onBeforeUnmount(() => window.removeEventListener('coomi:appearance-changed', syncCustomAppearance))
@@ -243,22 +216,6 @@ onBeforeUnmount(() => window.removeEventListener('coomi:appearance-changed', syn
         </button>
       </div>
 
-      <p class="sec-label">隐私</p>
-      <div class="group">
-        <button class="row" @click="toggleTelemetry">
-          <span class="ri" :class="{ on: telemetryEnabled }"><CoomiIcon name="shield" :size="17" /></span>
-          <span class="rt">
-            <span class="rmain">匿名使用统计</span>
-            <span class="rsub" :class="{ err: !!telemetryError }">
-              {{ telemetryError || (telemetryEnabled
-                ? '仅上报 SKILL 安装与使用次数，不含任何对话内容，可随时关闭'
-                : '已关闭：不再上报任何统计数据') }}
-            </span>
-          </span>
-          <span class="sw" :class="{ on: telemetryEnabled }" />
-        </button>
-      </div>
-
       <p class="sec-label">模型</p>
       <div class="group model-list">
         <p v-if="modelRows.length === 0" class="empty">还没有可用模型，先到下面配置 Provider。</p>
@@ -270,6 +227,18 @@ onBeforeUnmount(() => window.removeEventListener('coomi:appearance-changed', syn
           <CoomiIcon v-if="isCurrent(r.providerId, r.model)" name="check" :size="17" class="tick" />
         </button>
       </div>
+      <p class="sec-label">子代理</p>
+      <div class="group">
+        <button class="row" @click="router.push('/subagents')">
+          <span class="ri"><CoomiIcon name="subtask" :size="17" /></span>
+          <span class="rt">
+            <span class="rmain">子代理模型</span>
+            <span class="rsub">为审查、编码等任务指定不同模型；不配置则沿用主模型</span>
+          </span>
+          <CoomiIcon name="chevronRight" :size="15" class="arw" />
+        </button>
+      </div>
+
       <p class="sec-label">配置</p>
       <div class="group">
         <button class="row" @click="router.push('/sessions')">

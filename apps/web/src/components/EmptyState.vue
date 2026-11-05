@@ -24,7 +24,7 @@ const MODES = [
 const SUGGESTIONS: { icon: string; text: string; guide?: string }[] = [
   { icon: 'phone', text: '查看手机系统信息与型号信息' },
   { icon: 'globe', text: '今日科技圈热点话题' },
-  { icon: 'sparkle', text: 'Coomi 新手使用指南', guide: 'newbie' },
+  { icon: 'sparkle', text: 'CoomiLite 新手使用指南', guide: 'newbie' },
   { icon: 'cube', text: '自定义拓展进化指南', guide: 'extension' },
 ]
 
@@ -43,9 +43,12 @@ function pick(key: 'fast' | 'plan' | 'careful') {
 
 <template>
   <div class="empty">
-    <CoomiMark :size="52" class="logo" />
-    <h1>有什么可以帮你？</h1>
-    <p class="sub">我在你手机里的 Linux 环境真实执行命令、读写文件、跑脚本。</p>
+    <div class="brand-aura"><CoomiMark :size="64" class="logo" /></div>
+    <p class="motto" :class="{ 'motto-guofeng': config.mottoFont === 'guofeng' }">
+      <span v-if="config.mottoFont === 'guofeng'" class="motto-art" role="img" aria-label="慎终如始，则无败事" />
+      <template v-else>慎终如始，则无败事</template>
+    </p>
+    <p class="sub">准备好了，就告诉我想做什么</p>
 
     <p v-if="connection.demo" class="demobar">
       <CoomiIcon name="alert" :size="14" />
@@ -91,10 +94,46 @@ function pick(key: 'fast' | 'plan' | 'careful') {
   text-align: center;
 }
 .logo { margin-bottom: 14px; }
+.brand-aura {
+  animation: brand-in .55s ease both, brand-breathe 2.4s ease-in-out .6s infinite;
+}
+.motto {
+  margin: 12px 0 0;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 17px;
+  line-height: 1.6;
+  font-weight: 750;
+  letter-spacing: .04em;
+  animation: motto-in .45s .2s ease both;
+}
+.motto-guofeng { line-height: 0; }
+.motto-art {
+  display: block;
+  width: min(236px, calc(100vw - 84px));
+  height: calc(min(236px, calc(100vw - 84px)) * 210 / 1722);
+  aspect-ratio: 1722 / 210;
+  background: var(--text);
+  -webkit-mask: url('/brand/motto-calligraphy.png') center / contain no-repeat;
+  mask: url('/brand/motto-calligraphy.png') center / contain no-repeat;
+}
 h1 { font-size: 21px; font-weight: 600; letter-spacing: -.3px; color: var(--text); }
 .sub {
   max-width: 268px; margin-top: 8px;
   font-size: 13.5px; line-height: 1.65; color: var(--text-3);
+  animation: motto-in .4s .35s ease both;
+}
+@keyframes brand-in {
+  from { opacity: 0; transform: scale(.86); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes brand-breathe {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+@keyframes motto-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 .demobar {
   display: flex; align-items: flex-start; gap: 7px;

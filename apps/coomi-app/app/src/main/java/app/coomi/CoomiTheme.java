@@ -55,7 +55,7 @@ import java.util.UUID;
  */
 public final class CoomiTheme {
 
-    public static final String ACTION_THEME_CHANGED = "com.coomi.android.action.THEME_CHANGED";
+    public static final String ACTION_THEME_CHANGED = "com.coomi.lite.action.THEME_CHANGED";
 
     /** 主题档位：system 跟随系统、light 明亮、dark 夜间。 */
     public static final String MODE_SYSTEM = "system";

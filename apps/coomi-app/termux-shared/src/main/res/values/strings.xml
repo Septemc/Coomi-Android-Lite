@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 
 <!DOCTYPE resources [
-    <!ENTITY TERMUX_PACKAGE_NAME "com.coomi.android">
-    <!ENTITY TERMUX_APP_NAME "Coomi">
-    <!ENTITY TERMUX_API_APP_NAME "Coomi:API">
-    <!ENTITY TERMUX_BOOT_APP_NAME "Coomi:Boot">
-    <!ENTITY TERMUX_FLOAT_APP_NAME "Coomi:Float">
-    <!ENTITY TERMUX_STYLING_APP_NAME "Coomi:Styling">
-    <!ENTITY TERMUX_TASKER_APP_NAME "Coomi:Tasker">
-    <!ENTITY TERMUX_WIDGET_APP_NAME "Coomi:Widget">
-    <!ENTITY TERMUX_PREFIX_DIR_PATH "/data/data/com.coomi.android/files/usr">
+    <!ENTITY TERMUX_PACKAGE_NAME "com.coomi.lite">
+    <!ENTITY TERMUX_APP_NAME "CoomiLite">
+    <!ENTITY TERMUX_API_APP_NAME "CoomiLite:API">
+    <!ENTITY TERMUX_BOOT_APP_NAME "CoomiLite:Boot">
+    <!ENTITY TERMUX_FLOAT_APP_NAME "CoomiLite:Float">
+    <!ENTITY TERMUX_STYLING_APP_NAME "CoomiLite:Styling">
+    <!ENTITY TERMUX_TASKER_APP_NAME "CoomiLite:Tasker">
+    <!ENTITY TERMUX_WIDGET_APP_NAME "CoomiLite:Widget">
+    <!ENTITY TERMUX_PREFIX_DIR_PATH "/data/data/com.coomi.lite/files/usr">
     ]>
 
 <resources>

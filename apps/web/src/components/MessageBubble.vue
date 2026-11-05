@@ -13,6 +13,8 @@ import { useSessionStore } from '@/stores/session'
 import { renderMarkdown } from '@/utils/markdown'
 import CoomiIcon from './CoomiIcon.vue'
 import FileInline from './FileInline.vue'
+import AttachmentStrip from './AttachmentStrip.vue'
+import { attachmentFromPath } from '@/utils/attachments'
 
 const props = defineProps<{ msg: AssistantMessage | UserMessage }>()
 const session = useSessionStore()
@@ -24,6 +26,9 @@ let timer: ReturnType<typeof setTimeout> | null = null
 let last = 0
 
 const isUser = computed(() => props.msg.kind === 'user')
+const userAttachments = computed(() => props.msg.kind === 'user'
+  ? (props.msg.attachments ?? []).map(item => typeof item === 'string' ? attachmentFromPath(item) : item)
+  : [])
 const streaming = computed(() => props.msg.kind === 'assistant' && props.msg.streaming)
 const src = computed(() => (props.msg.kind === 'assistant' ? props.msg.content : ''))
 
@@ -118,7 +123,10 @@ async function copyAll() {
 
 <template>
   <div v-if="isUser" class="row user">
-    <div class="bubble cascade">{{ msg.content }}</div>
+    <div class="user-wrap">
+      <div class="bubble cascade">{{ msg.content }}</div>
+      <AttachmentStrip v-if="userAttachments.length" :items="userAttachments" />
+    </div>
   </div>
 
   <div v-else class="assistant">
@@ -137,8 +145,9 @@ async function copyAll() {
 <style scoped>
 .row { display: flex; }
 .row.user { justify-content: flex-end; }
+.user-wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: 84%; }
 .bubble {
-  max-width: 84%; padding: 10px 15px;
+  max-width: 100%; padding: 10px 15px;
   border-radius: 19px 19px 7px 19px;
   background: var(--blue); color: #fff;
   font-size: 15.5px; line-height: 1.55; word-break: break-word;

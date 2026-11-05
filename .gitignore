@@ -57,4 +57,16 @@ docs/反馈整理/
 docs/总结文档/
 build_log*.txt
 java_pid*.hprof
+*.hprof
 scripts/__pycache__/
+tools/__pycache__/
+
+# ---- Lite: large local artifacts ----
+release-dist/
+runtime-v2-dist/
+video-demo/
+video-demo-inspect/
+promo-video/
+feedback-server-work/
+site-work/
+.tmp/

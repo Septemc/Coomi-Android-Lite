@@ -55,16 +55,15 @@ android {
     }
 
     defaultConfig {
-        // NOTE: applicationId is "com.coomi.android" (Coomi's own package name).
-        // The official Termux bootstrap has /data/data/com.termux baked into apt/dpkg/bash
-        // at compile time, so package installation (pkg/apt) may fail until a bootstrap
-        // rebuilt for com.coomi.android is supplied; bash and most core tools work via $PREFIX.
-        applicationId "com.coomi.android"
+        // Lite is a separate install line: com.coomi.lite. The official Termux
+        // bootstrap has /data/data/com.termux baked into apt/dpkg/bash, so package
+        // installation (pkg/apt) may remain limited; bash and core tools work via $PREFIX.
+        applicationId "com.coomi.lite"
         minSdkVersion project.properties.minSdkVersion.toInteger()
         targetSdkVersion coomiTargetSdk
-        // Keep the executable Termux bootstrap security domain for v1.3.2.
-        versionCode 28
-        versionName "1.3.2"
+        // Lite line seeded from v1.3.2. Keep the Termux bootstrap security domain.
+        versionCode 200
+        versionName "2.0.0-lite.1"
 
         if (appVersionName) versionName = appVersionName
         validateVersionName(versionName)
@@ -74,14 +73,14 @@ android {
         // 演示包开关：只有 demo 构建类型会打成 true，见 buildTypes.demo。
         buildConfigField "boolean", "COOMI_DEMO", "false"
 
-        manifestPlaceholders.TERMUX_PACKAGE_NAME = "com.coomi.android"
-        manifestPlaceholders.TERMUX_APP_NAME = "Coomi"
-        manifestPlaceholders.TERMUX_API_APP_NAME = "Coomi:API"
-        manifestPlaceholders.TERMUX_BOOT_APP_NAME = "Coomi:Boot"
-        manifestPlaceholders.TERMUX_FLOAT_APP_NAME = "Coomi:Float"
-        manifestPlaceholders.TERMUX_STYLING_APP_NAME = "Coomi:Styling"
-        manifestPlaceholders.TERMUX_TASKER_APP_NAME = "Coomi:Tasker"
-        manifestPlaceholders.TERMUX_WIDGET_APP_NAME = "Coomi:Widget"
+        manifestPlaceholders.TERMUX_PACKAGE_NAME = "com.coomi.lite"
+        manifestPlaceholders.TERMUX_APP_NAME = "CoomiLite"
+        manifestPlaceholders.TERMUX_API_APP_NAME = "CoomiLite:API"
+        manifestPlaceholders.TERMUX_BOOT_APP_NAME = "CoomiLite:Boot"
+        manifestPlaceholders.TERMUX_FLOAT_APP_NAME = "CoomiLite:Float"
+        manifestPlaceholders.TERMUX_STYLING_APP_NAME = "CoomiLite:Styling"
+        manifestPlaceholders.TERMUX_TASKER_APP_NAME = "CoomiLite:Tasker"
+        manifestPlaceholders.TERMUX_WIDGET_APP_NAME = "CoomiLite:Widget"
 
         ndk {
             abiFilters 'arm64-v8a'
@@ -287,8 +286,10 @@ def validateVersionName(String versionName) {
 /**
  * Stage the bootstrap zip that gets embedded into the APK via the libtermux-bootstrap NDK module.
  *
- * We use the official Termux bootstrap from references/termux-bootstrap/ rather than downloading
- * a custom one (see defaultConfig above for the package-name caveat).
+ * The tracked `src/main/cpp/bootstrap-aarch64.zip` is the default and keeps a
+ * clean checkout buildable without the gitignored `references/` tree. If that
+ * file is missing, fall back to a newer bootstrap in references/termux-bootstrap/
+ * (see defaultConfig above for the package-name caveat).
  */
 def stageBootstrap(String arch) {
     def target = new File(projectDir, "src/main/cpp/bootstrap-" + arch + ".zip")
@@ -302,8 +303,9 @@ def stageBootstrap(String arch) {
         referenceDir.listFiles({ f -> f.name.startsWith("bootstrap-" + arch) && f.name.endsWith(".zip") } as FileFilter) : null
 
     if (candidates == null || candidates.length == 0) {
-        throw new GradleException("No local bootstrap found for " + arch + " in " + referenceDir +
-            "\nExpected a file named bootstrap-" + arch + "*.zip")
+        throw new GradleException("No bootstrap zip for " + arch + ".\n" +
+            "Restore the tracked file with `git checkout -- apps/coomi-app/app/src/main/cpp/bootstrap-" + arch + ".zip`, " +
+            "or add bootstrap-" + arch + "*.zip to " + referenceDir)
     }
 
     // Prefer the newest by filename (they are date-stamped).
@@ -317,14 +319,6 @@ def stageBootstrap(String arch) {
         rename { target.name }
     }
     logger.quiet("Staged bootstrap from " + source.name + " (" + target.length() + " bytes)")
-}
-
-clean {
-    doLast {
-        def tree = fileTree(new File(projectDir, 'src/main/cpp'))
-        tree.include 'bootstrap-*.zip'
-        tree.each { it.delete() }
-    }
 }
 
 task stageBootstraps() {

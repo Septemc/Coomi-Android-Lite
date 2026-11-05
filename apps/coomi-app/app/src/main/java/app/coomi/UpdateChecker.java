@@ -27,14 +27,16 @@ import org.json.JSONObject;
 
 /**
  * 软件内检查更新（第三批 6）：
- * 读取 updates.septemc.com/coomi/android/latest.json，与当前 versionCode 比较，
+ * 读取 updates.septemc.com/coomi/lite/android/latest.json，与当前 versionCode 比较，
  * 有新版则提示并下载 APK（DownloadManager → 私有 files 目录），完成后经
  * FileProvider 唤起系统安装器。
  */
 public final class UpdateChecker {
 
+    // Lite is a separate package (com.coomi.lite); never point it at the full
+    // Coomi feed, otherwise the downloaded APK cannot install over this app.
     private static final String UPDATE_URL =
-        "https://updates.septemc.com/coomi/android/latest.json";
+        "https://updates.septemc.com/coomi/lite/android/latest.json";
     private static final String TAG = "UpdateChecker";
 
     public interface Callback {
@@ -60,7 +62,7 @@ public final class UpdateChecker {
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setConnectTimeout(8000);
                 conn.setReadTimeout(8000);
-                conn.setRequestProperty("User-Agent", "Coomi-Android/" + currentVersionCode(context));
+                conn.setRequestProperty("User-Agent", "CoomiLite/" + currentVersionCode(context));
                 int code = conn.getResponseCode();
                 if (code != 200) {
                     callback.onResult(false, null, null, "更新源返回 HTTP " + code);
@@ -92,7 +94,7 @@ public final class UpdateChecker {
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setConnectTimeout(8000);
                 conn.setReadTimeout(8000);
-                conn.setRequestProperty("User-Agent", "Coomi-Android/" + currentVersionCode(context));
+                conn.setRequestProperty("User-Agent", "CoomiLite/" + currentVersionCode(context));
                 int code = conn.getResponseCode();
                 if (code != 200) {
                     callback.onResult(false, null, null, "更新源返回 HTTP " + code);
@@ -128,7 +130,7 @@ public final class UpdateChecker {
         String fileName = "coomi-update-" + safeVersion + ".apk";
 
         DownloadManager.Request request = new DownloadManager.Request(Uri.parse(apkUrl));
-        request.setTitle("Coomi " + version);
+        request.setTitle("CoomiLite " + version);
         request.setDescription("正在下载更新包…");
         request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
         request.setMimeType("application/vnd.android.package-archive");

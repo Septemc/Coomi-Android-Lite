@@ -26,7 +26,7 @@ public final class CoomiConstants {
 
     // Notification
     public static final String NOTIFICATION_CHANNEL_ID = "coomi_engine";
-    public static final String NOTIFICATION_CHANNEL_NAME = "Coomi Engine";
+    public static final String NOTIFICATION_CHANNEL_NAME = "CoomiLite Engine";
     public static final int NOTIFICATION_ID = 1001;
 
     // Bootstrap / Rust runtime

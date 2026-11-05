@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Coomi launcher icons + in-app logos from assets/coomi-agent.png.
+"""Generate CoomiLite launcher icons + in-app logos from assets/coomi-agent-lite.png.
 
 The source art is a blue quatrefoil mark on a solid white canvas. We rebuild it as:
 
@@ -7,6 +7,7 @@ The source art is a blue quatrefoil mark on a solid white canvas. We rebuild it 
   * mipmap-*/ic_launcher_round.png    legacy round icon, white circle
   * mipmap-*/ic_launcher_foreground.png  adaptive foreground, transparent
   * drawable-nodpi/coomi_logo.png     in-app logo, transparent, 512px
+  * drawable/banner.png               Android TV banner, 320x180
   * apps/web/public/coomi-logo.png    web/WebView logo, 256px
 
 Alpha is recovered by thresholding "not white" at the source resolution and
@@ -21,10 +22,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC = ROOT / "assets" / "coomi-agent.png"
+SRC = ROOT / "assets" / "coomi-agent-lite.png"
 RES = ROOT / "apps" / "coomi-app" / "app" / "src" / "main" / "res"
 WEB_PUBLIC = ROOT / "apps" / "web" / "public"
 
@@ -48,8 +49,12 @@ def load_trimmed() -> tuple[Image.Image, Image.Image]:
     if not SRC.exists():
         sys.exit(f"source icon not found: {SRC}")
     rgb = Image.open(SRC).convert("RGB")
+    # Some exported PNGs carry a 1px transparent/black border after RGB
+    # conversion; ignore it so the mark is not shrunk by the full canvas.
+    edge = min(2, rgb.width // 10, rgb.height // 10)
+    if edge > 0:
+        rgb = rgb.crop((edge, edge, rgb.width - edge, rgb.height - edge))
     # Binary "is ink" mask at full source resolution.
-    r, g, b = rgb.split()
     mask = Image.new("L", rgb.size, 0)
     px_rgb = rgb.load()
     px_mask = mask.load()
@@ -140,6 +145,18 @@ def main() -> None:
 
     # In-app logo for Android layouts.
     save(logo_rgba(rgb, mask, 512), RES / "drawable-nodpi" / "coomi_logo.png")
+
+    # Android TV banner: lite mark + wordmark on a dark background.
+    canvas = Image.new("RGBA", (320, 180), (16, 24, 38, 255))
+    canvas.alpha_composite(logo_rgba(rgb, mask, 96), (16, 42))
+    try:
+        font = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", 34)
+    except OSError:
+        font = ImageFont.load_default()
+    draw = ImageDraw.Draw(canvas)
+    draw.text((124, 90), "CoomiLite", font=font, fill=(255, 255, 255, 255), anchor="lm")
+    draw.rectangle((0, 168, 320, 180), fill=(43, 108, 212, 255))
+    save(canvas.convert("RGB"), RES / "drawable" / "banner.png")
 
     # Web / WebView logo + favicon.
     save(logo_rgba(rgb, mask, 256), WEB_PUBLIC / "coomi-logo.png")

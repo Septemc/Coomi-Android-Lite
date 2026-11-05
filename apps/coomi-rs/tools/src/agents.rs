@@ -14,6 +14,7 @@ use coomi_security::SecurityPolicy;
 use coomi_services::HttpModelProvider;
 use coomi_services::MemoryManager;
 use coomi_services::ProviderConfig;
+use coomi_services::ResolvedSubAgent;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -32,6 +33,9 @@ pub struct AgentSnapshot {
     pub task: String,
     pub output: String,
     pub elapsed_ms: u128,
+    pub profile_id: String,
+    pub profile_name: String,
+    pub model: String,
 }
 
 struct AgentRecord {
@@ -40,12 +44,27 @@ struct AgentRecord {
     output: Arc<Mutex<String>>,
     started: Instant,
     abort: Option<AbortHandle>,
+    profile_id: String,
+    profile_name: String,
+    model: String,
+}
+
+#[derive(Clone)]
+struct RunProfile {
+    id: String,
+    name: String,
+    provider: ProviderConfig,
+    instructions: Option<String>,
+    tools: Vec<String>,
+    max_parallel: usize,
 }
 
 pub struct AgentScheduler {
     cwd: PathBuf,
     home: PathBuf,
     provider: ProviderConfig,
+    profiles: BTreeMap<String, ResolvedSubAgent>,
+    default_profile: Option<String>,
     policy: AccessMode,
     system_prompt: String,
     persistent_memory: bool,
@@ -65,12 +84,33 @@ impl AgentScheduler {
             cwd,
             home,
             provider,
+            profiles: BTreeMap::new(),
+            default_profile: None,
             policy,
             system_prompt,
             persistent_memory: true,
             max_agents: 3,
             agents: Mutex::new(BTreeMap::new()),
         })
+    }
+
+    /// Attach named sub-agent profiles loaded from settings. Calling this before
+    /// the scheduler is shared keeps the builder chain cheap.
+    pub fn with_profiles(
+        mut self: Arc<Self>,
+        profiles: Vec<ResolvedSubAgent>,
+        default_profile: Option<String>,
+    ) -> Arc<Self> {
+        let scheduler = Arc::get_mut(&mut self)
+            .expect("agent scheduler must be configured before it is shared");
+        scheduler.profiles = profiles
+            .into_iter()
+            .map(|profile| (profile.id.to_ascii_lowercase(), profile))
+            .collect();
+        scheduler.default_profile = default_profile
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
+        self
     }
 
     pub fn without_persistent_memory(mut self: Arc<Self>) -> Arc<Self> {
@@ -80,15 +120,72 @@ impl AgentScheduler {
         self
     }
 
+    fn resolve_profile(&self, agent_id: Option<&str>) -> Result<RunProfile, String> {
+        let requested = agent_id
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .or(self.default_profile.as_deref());
+        if let Some(requested) = requested {
+            let profile = self
+                .profiles
+                .get(&requested.to_ascii_lowercase())
+                .ok_or_else(|| {
+                    let available = self
+                        .profiles
+                        .values()
+                        .map(|profile| profile.id.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    if available.is_empty() {
+                        "no sub-agent profiles are configured; omit agent_id".to_owned()
+                    } else {
+                        format!("unknown agent_id `{requested}`; available: {available}")
+                    }
+                })?;
+            return Ok(RunProfile {
+                id: profile.id.clone(),
+                name: profile.name.clone(),
+                provider: profile.provider.clone(),
+                instructions: profile.instructions.clone(),
+                tools: profile.tools.clone(),
+                max_parallel: profile.max_parallel,
+            });
+        }
+        Ok(RunProfile {
+            id: "main".into(),
+            name: "主模型".into(),
+            provider: self.provider.clone(),
+            instructions: None,
+            tools: Vec::new(),
+            max_parallel: self.max_agents,
+        })
+    }
+
+    pub fn sub_agent_summary(&self) -> String {
+        if self.profiles.is_empty() {
+            return "No dedicated sub-agent profiles are configured; omit agent_id to use the main model."
+                .into();
+        }
+        let entries = self
+            .profiles
+            .values()
+            .map(|profile| format!("{} ({})", profile.id, profile.provider.model))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("Configured sub-agent profiles: {entries}. Use agent_id to select one.")
+    }
+
     pub async fn spawn(
         self: &Arc<Self>,
         task: String,
         parent_messages: &[ChatMessage],
         fork_turns: Option<&str>,
+        agent_id: Option<&str>,
     ) -> Result<String, String> {
         if task.trim().is_empty() {
             return Err("agent task must not be empty".into());
         }
+        let profile = self.resolve_profile(agent_id)?;
         {
             let agents = self.agents.lock().await;
             let running = agents
@@ -101,6 +198,19 @@ impl AgentScheduler {
                     self.max_agents
                 ));
             }
+            let profile_running = agents
+                .values()
+                .filter(|record| {
+                    record.status == "running"
+                        && record.profile_id.eq_ignore_ascii_case(&profile.id)
+                })
+                .count();
+            if profile_running >= profile.max_parallel {
+                return Err(format!(
+                    "sub-agent `{}` concurrency limit reached ({})",
+                    profile.name, profile.max_parallel
+                ));
+            }
         }
 
         let id = Uuid::new_v4().to_string();
@@ -110,9 +220,15 @@ impl AgentScheduler {
         let task_for_run = task.clone();
         let id_for_run = id.clone();
         let output_for_run = Arc::clone(&output);
+        let profile_for_run = profile.clone();
         let join = tokio::spawn(async move {
             let result = scheduler
-                .run_agent(messages, task_for_run, Arc::clone(&output_for_run))
+                .run_agent(
+                    profile_for_run,
+                    messages,
+                    task_for_run,
+                    Arc::clone(&output_for_run),
+                )
                 .await;
             let mut agents = scheduler.agents.lock().await;
             if let Some(record) = agents.get_mut(&id_for_run) {
@@ -139,6 +255,9 @@ impl AgentScheduler {
                 output,
                 started: Instant::now(),
                 abort: Some(join.abort_handle()),
+                profile_id: profile.id,
+                profile_name: profile.name,
+                model: profile.provider.model,
             },
         );
         Ok(id)
@@ -146,26 +265,36 @@ impl AgentScheduler {
 
     async fn run_agent(
         self: &Arc<Self>,
+        profile: RunProfile,
         messages: Vec<ChatMessage>,
         task: String,
         output: Arc<Mutex<String>>,
     ) -> anyhow::Result<()> {
-        let mut session = Session::new(&self.provider.id, &self.provider.model, self.cwd.clone());
+        let mut session =
+            Session::new(&profile.provider.id, &profile.provider.model, self.cwd.clone());
         session.messages = messages;
-        let provider = HttpModelProvider::new(self.provider.clone())?;
+        let provider = HttpModelProvider::new(profile.provider.clone())?;
         let security = SecurityPolicy::new(&self.cwd, self.policy)?;
         let mut tools = CoreTools::new(self.cwd.clone(), security)
             .with_skills_directory(self.home.join("skills"))
             .with_config_home(self.home.clone())
             .with_hooks(Arc::new(HookRunner::load(&self.home)?));
+        if !profile.tools.is_empty() {
+            tools = tools.with_allowed_tools(profile.tools.clone());
+        }
         if self.persistent_memory {
             tools = tools.with_memory(Arc::new(MemoryManager::new(&self.home, &self.cwd)));
         }
         let observer = AgentOutputObserver { output };
-        Agent::new(format!(
-            "{}\n\nYou are a delegated Coomi sub-agent. Complete the assigned task independently and return a concise result to the parent agent.",
-            self.system_prompt
-        ))
+        let mut system_prompt = self.system_prompt.clone();
+        if let Some(instructions) = &profile.instructions {
+            system_prompt.push_str("\n\n## Sub-agent instructions\n");
+            system_prompt.push_str(instructions);
+        }
+        system_prompt.push_str(
+            "\n\nYou are a delegated Coomi sub-agent. Complete the assigned task independently and return a concise result to the parent agent.",
+        );
+        Agent::new(system_prompt)
         .run_turn(
             &mut session,
             task,
@@ -230,18 +359,24 @@ impl AgentScheduler {
                     record.task.clone(),
                     Arc::clone(&record.output),
                     record.started.elapsed().as_millis(),
+                    record.profile_id.clone(),
+                    record.profile_name.clone(),
+                    record.model.clone(),
                 )
             })
             .collect::<Vec<_>>();
         drop(agents);
         let mut snapshots = Vec::with_capacity(records.len());
-        for (id, status, task, output, elapsed_ms) in records {
+        for (id, status, task, output, elapsed_ms, profile_id, profile_name, model) in records {
             snapshots.push(AgentSnapshot {
                 id,
                 status,
                 task,
                 output: output.lock().await.clone(),
                 elapsed_ms,
+                profile_id,
+                profile_name,
+                model,
             });
         }
         snapshots
@@ -319,7 +454,10 @@ pub fn snapshots_json(snapshots: &[AgentSnapshot]) -> Value {
                     "status": snapshot.status,
                     "task": snapshot.task,
                     "output": snapshot.output,
-                    "elapsed_ms": snapshot.elapsed_ms.to_string()
+                    "elapsed_ms": snapshot.elapsed_ms.to_string(),
+                    "profile_id": snapshot.profile_id,
+                    "profile_name": snapshot.profile_name,
+                    "model": snapshot.model
                 })
             })
             .collect(),

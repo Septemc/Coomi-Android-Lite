@@ -347,9 +347,9 @@ public final class TermuxConstants {
      */
 
     /** Termux app name */
-    public static final String TERMUX_APP_NAME = "Coomi"; // Default: "Termux"
+    public static final String TERMUX_APP_NAME = "CoomiLite"; // Default: "Termux"
     /** Termux package name */
-    public static final String TERMUX_PACKAGE_NAME = "com.coomi.android"; // Default: "com.termux"
+    public static final String TERMUX_PACKAGE_NAME = "com.coomi.lite"; // Default: "com.termux"
     /** Termux GitHub repo name */
     public static final String TERMUX_GITHUB_REPO_NAME = "termux-app"; // Default: "termux-app"
     /** Termux GitHub repo url */
@@ -919,7 +919,7 @@ public final class TermuxConstants {
 
         /**
          * Java/namespace package of the app classes. The installed package name changed to
-         * "com.coomi.android", but the Java class tree and BuildConfig stay under
+         * "com.coomi.lite", but the Java class tree and BuildConfig stay under
          * "com.termux" (namespace is unchanged), so class-name constants must use this
          * prefix instead of {@link TermuxConstants#TERMUX_PACKAGE_NAME}.
          */

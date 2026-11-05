@@ -5,13 +5,13 @@
 Coomi-Android 1.2.6 将 `targetSdkVersion` 从 28 提升到 36。应用仍把 Termux bootstrap 解压到私有可写目录，并从以下路径启动 shell：
 
 ```text
-/data/data/com.coomi.android/files/usr/bin/bash
+/data/data/com.coomi.lite/files/usr/bin/bash
 ```
 
 Android 会根据目标 SDK 为普通应用选择 SELinux 执行域。target 29 及以上的普通应用不能执行私有可写目录中的代码，因此安装向导报错：
 
 ```text
-/system/bin/sh: /data/data/com.coomi.android/files/usr/bin/bash: Permission denied
+/system/bin/sh: /data/data/com.coomi.lite/files/usr/bin/bash: Permission denied
 ```
 
 这不是通知权限、Root 权限、文件模式或网络问题。`chmod 0700` 不能绕过 SELinux 策略。

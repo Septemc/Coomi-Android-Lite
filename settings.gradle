@@ -23,7 +23,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "coomi"
+rootProject.name = "coomi-lite"
 
 include ':app'
 project(':app').projectDir = file('apps/coomi-app/app')

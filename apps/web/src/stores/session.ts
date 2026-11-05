@@ -12,6 +12,7 @@ import { useConnectionStore } from './connection'
 import { useConfigStore } from './config'
 import { useSessionsStore } from './sessions'
 import { router } from '@/router'
+import { buildAttachmentRequest, parseAttachmentRequest, type ChatAttachment } from '@/utils/attachments'
 import type { AssistantMessage, LoopProgress, QuestionCard, ReasoningBlock, RunState, Timelineitem, ToolCard, ToolDiagnosticTrace } from './viewModel'
 
 export const useSessionStore = defineStore('session', () => {
@@ -54,7 +55,7 @@ export const useSessionStore = defineStore('session', () => {
 
   /** 发送内置引导（EmptyState 引导卡）：先置用户标题消息，再让引擎流式推正文。 */
   const GUIDE_TITLES: Record<string, string> = {
-    newbie: 'Coomi 新手使用指南',
+    newbie: 'CoomiLite 新手使用指南',
     extension: '自定义拓展进化指南',
   }
   function sendGuide(key: string) {
@@ -359,22 +360,30 @@ export const useSessionStore = defineStore('session', () => {
     if (changed) persistSoon()
   }
 
-  function sendMessage(text: string) {
-    const trimmed = text.trim()
-    if (!trimmed) return
+  function sendMessage(text: string, attachments: ChatAttachment[] = []) {
+    const visible = text.trim()
+    if (!visible && attachments.length === 0) return
+    const transportText = buildAttachmentRequest(visible, attachments)
+    const display = visible || attachments.map(item => item.name).join('、')
     // 首条用户消息作为会话标题，抽屉里就不会全是「新对话」。
     const isFirst = !timeline.value.some(t => t.kind === 'user')
-    if (isFirst) sessions.touch(sessionId.value, { title: sessions.deriveTitle(trimmed) })
+    if (isFirst) sessions.touch(sessionId.value, { title: sessions.deriveTitle(display) })
+    const userMessage = {
+      kind: 'user' as const,
+      id: nextId(),
+      content: display,
+      attachments: attachments.length ? [...attachments] : undefined,
+    }
     if (isBusy.value) {
-      timeline.value.push({ kind: 'user', id: nextId(), content: trimmed })
-      transport.value?.send({ command: 'jump_in', text: trimmed })
+      timeline.value.push(userMessage)
+      transport.value?.send({ command: 'jump_in', text: transportText })
       persistSoon()
       return
     }
     turnToolTrace = []
-    timeline.value.push({ kind: 'user', id: nextId(), content: trimmed })
+    timeline.value.push(userMessage)
     runState.value = 'thinking'
-    transport.value?.send({ command: 'send_message', text: trimmed })
+    transport.value?.send({ command: 'send_message', text: transportText })
     persistSoon()
   }
 
@@ -445,7 +454,13 @@ export const useSessionStore = defineStore('session', () => {
         continue
       }
       if (m.role === 'user') {
-        items.push({ kind: 'user', id: nextId(), content: m.content })
+        const parsed = parseAttachmentRequest(m.content)
+        items.push({
+          kind: 'user',
+          id: nextId(),
+          content: parsed.text,
+          attachments: parsed.attachments.length ? parsed.attachments : undefined,
+        })
       } else if (m.role === 'assistant') {
         if (m.content) items.push({ kind: 'assistant', id: nextId(), content: m.content, streaming: false })
         for (const tc of m.tool_calls ?? []) {

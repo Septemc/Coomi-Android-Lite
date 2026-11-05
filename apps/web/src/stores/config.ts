@@ -103,6 +103,7 @@ export const PERMISSION_MODES: { mode: PermissionMode; label: string; desc: stri
 
 /** 主题三档：system 跟随系统、light 明亮、dark 夜间。 */
 export type ThemeMode = 'system' | 'light' | 'dark' | 'book' | 'orange'
+export type MottoFont = 'default' | 'guofeng'
 export const THEME_MODES: { mode: ThemeMode; label: string; desc: string }[] = [
   { mode: 'system', label: '跟随系统', desc: '与手机系统深浅色保持一致' },
   { mode: 'light', label: '明亮模式', desc: '始终使用浅色界面' },
@@ -132,6 +133,15 @@ export function readThemeMode(): ThemeMode {
   return ['light', 'dark', 'system', 'book', 'orange'].includes(saved ?? '') ? saved as ThemeMode : 'system'
 }
 
+/** 空态格言字体：默认文字，guofeng 使用书法遮罩资源。 */
+export function readMottoFont(): MottoFont {
+  try {
+    return localStorage.getItem('coomi.mottoFont') === 'guofeng' ? 'guofeng' : 'default'
+  } catch {
+    return 'default'
+  }
+}
+
 /** 写入 <html data-theme>，前端 global.css 据此切换暗色主题。 */
 export function applyTheme(mode: ThemeMode) {
   const dark = mode === 'dark'
@@ -150,6 +160,7 @@ export const useConfigStore = defineStore('config', () => {
   const permissionMode = ref<PermissionMode>(['ask', 'auto', 'full'].includes(savedPermission ?? '') ? savedPermission! : 'ask')
   const planMode = ref(false)
   const themeMode = ref<ThemeMode>(readThemeMode())
+  const mottoFont = ref<MottoFont>(readMottoFont())
   const savedEffort = localStorage.getItem('coomi.reasoningEffort') as ReasoningEffort | null
   const reasoningEffort = ref<ReasoningEffort>(REASONING_EFFORTS.some(item => item.value === savedEffort) ? savedEffort! : 'auto')
   const savedRounds = Number(localStorage.getItem('coomi.maxToolRounds'))
@@ -278,6 +289,10 @@ export const useConfigStore = defineStore('config', () => {
     if (bridge && typeof bridge.setThemeMode === 'function') {
       try { bridge.setThemeMode(mode) } catch { /* 忽略桥异常 */ }
     }
+  }
+  function setMottoFont(value: MottoFont) {
+    mottoFont.value = value === 'guofeng' ? 'guofeng' : 'default'
+    try { localStorage.setItem('coomi.mottoFont', mottoFont.value) } catch { /* ignore */ }
   }
   function cyclePermissionMode(): PermissionMode {
     const order: PermissionMode[] = ['ask', 'auto', 'full']
@@ -485,9 +500,9 @@ export const useConfigStore = defineStore('config', () => {
   }
 
   return {
-    permissionMode, planMode, themeMode, reasoningEffort, maxToolRounds, connectionSettings, globalMemory, customPrompt, providers, activeId, loading, usingMock, lastError,
+    permissionMode, planMode, themeMode, mottoFont, reasoningEffort, maxToolRounds, connectionSettings, globalMemory, customPrompt, providers, activeId, loading, usingMock, lastError,
     currentProviderId, currentModel, currentProvider, mergedProviders,
-    fetchProviders, selectModel, setPermissionMode, setThemeMode, setReasoningEffort, setMaxToolRounds, fetchConnectionSettings, saveConnectionSettings, cyclePermissionMode, togglePlanMode,
+    fetchProviders, selectModel, setPermissionMode, setThemeMode, setMottoFont, setReasoningEffort, setMaxToolRounds, fetchConnectionSettings, saveConnectionSettings, cyclePermissionMode, togglePlanMode,
     toggleGlobalMemory, syncGlobalMemoryFromEngine, fetchCustomPrompt, saveCustomPrompt,
     upsertProvider, deleteProvider, activateProvider, copyProvider, revealProviderKey, discoverModels,
   }

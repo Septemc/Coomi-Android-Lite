@@ -1,4 +1,5 @@
 import type { ToolAccess, UserQuestion } from '@/protocol/events'
+import type { ChatAttachment } from '@/utils/attachments'
 
 export type ToolCardStatus = 'starting' | 'running' | 'success' | 'error' | 'awaiting_approval' | 'cache_hit' | 'cancelled'
 
@@ -21,7 +22,7 @@ export interface ToolCard {
 }
 
 export interface AssistantMessage { kind: 'assistant'; id: string; content: string; streaming: boolean }
-export interface UserMessage { kind: 'user'; id: string; content: string }
+export interface UserMessage { kind: 'user'; id: string; content: string; attachments?: ChatAttachment[] }
 export interface ReasoningBlock { kind: 'reasoning'; id: string; content: string; expanded: boolean }
 
 export interface QuestionCard {

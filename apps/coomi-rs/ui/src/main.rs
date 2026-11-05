@@ -1,6 +1,7 @@
 use anyhow::Context;
 use anyhow::Result;
 use async_trait::async_trait;
+use clap::CommandFactory;
 use clap::Parser;
 use coomi_catalogs::CatalogInstaller;
 use coomi_catalogs::builtin_mcp;
@@ -29,13 +30,11 @@ use std::env;
 use std::io;
 use std::io::IsTerminal;
 use std::io::Read;
-use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
 
-mod terminal_ui;
 mod web;
 
 #[derive(Debug, Parser)]
@@ -185,7 +184,7 @@ async fn main() -> Result<()> {
             let registry = load_registry(&paths.home)?;
             let provider = registry.resolve(cli.model.as_deref())?;
             let mut session = Session::new(&provider.id, &provider.model, paths.cwd.clone());
-            run_turn(&cli, &paths, &mut session, provider, prompt, false).await?;
+            run_turn(&cli, &paths, &mut session, provider, prompt).await?;
         }
         Some(Command::Resume { id, last, prompt }) => {
             anyhow::ensure!(
@@ -204,9 +203,9 @@ async fn main() -> Result<()> {
             if let Some(prompt) = prompt {
                 let registry = load_registry(&paths.home)?;
                 let provider = provider_for_session(&registry, &session, cli.model.as_deref())?;
-                run_turn(&cli, &paths, &mut session, provider, prompt.clone(), false).await?;
+                run_turn(&cli, &paths, &mut session, provider, prompt.clone()).await?;
             } else {
-                interactive(&cli, &paths, session).await?;
+                print_session(&session);
             }
         }
         Some(Command::Compact { id, last }) => {
@@ -228,17 +227,12 @@ async fn main() -> Result<()> {
             compact_session(&cli, &paths, &mut session, provider).await?;
         }
         None => {
-            let registry = load_registry(&paths.home)?;
-            let provider = registry.resolve(cli.model.as_deref())?;
-            let session = Session::new(&provider.id, &provider.model, paths.cwd.clone());
-            interactive(&cli, &paths, session).await?;
+            let mut command = Cli::command();
+            command.print_help()?;
+            println!();
         }
     }
     Ok(())
-}
-
-async fn interactive(cli: &Cli, paths: &RuntimePaths, session: Session) -> Result<()> {
-    terminal_ui::run(cli, paths, session).await
 }
 
 async fn run_turn(
@@ -247,7 +241,6 @@ async fn run_turn(
     session: &mut Session,
     provider_config: ProviderConfig,
     prompt: String,
-    interactive: bool,
 ) -> Result<()> {
     let policy = SecurityPolicy::new(&paths.cwd, cli.policy)?;
     let scheduler = AgentScheduler::new(
@@ -274,7 +267,6 @@ async fn run_turn(
     let instructions = coomi_engine::discover_project_instructions(&paths.cwd)?;
     let system_prompt = system_prompt(&paths.cwd, cli.policy, &instructions, &paths.home);
     let approval = TerminalApproval {
-        interactive,
         approve_all: cli.yes,
     };
     let agent = Agent::new(system_prompt);
@@ -458,6 +450,23 @@ fn print_models(registry: &ProviderRegistry) {
     }
 }
 
+fn print_session(session: &Session) {
+    println!(
+        "{}  {}/{}  {}",
+        session.id,
+        session.provider_id,
+        session.model,
+        if session.title.is_empty() {
+            &session.summary
+        } else {
+            &session.title
+        }
+    );
+    if !session.summary.is_empty() && !session.title.is_empty() {
+        println!("{}", session.summary);
+    }
+}
+
 fn print_sessions(store: &SessionStore, cwd: Option<&Path>) -> Result<()> {
     let sessions = store.list(cwd)?;
     if sessions.is_empty() {
@@ -614,7 +623,6 @@ impl AgentObserver for TerminalObserver {
 }
 
 struct TerminalApproval {
-    interactive: bool,
     approve_all: bool,
 }
 
@@ -624,19 +632,10 @@ impl ApprovalHandler for TerminalApproval {
         if self.approve_all {
             return true;
         }
-        if !self.interactive {
-            return false;
-        }
         eprintln!("approval required: {reason}");
         eprintln!("tool: {} {}", call.name, compact_json(&call.arguments));
-        eprint!("approve once? [y/N] ");
-        if io::stderr().flush().is_err() {
-            return false;
-        }
-        let mut answer = String::new();
-        io::stdin()
-            .read_line(&mut answer)
-            .is_ok_and(|_| matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes"))
+        eprintln!("non-interactive build: re-run with --yes to approve this action.");
+        false
     }
 }
 

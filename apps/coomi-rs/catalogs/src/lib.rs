@@ -1,6 +1,5 @@
 use anyhow::Context;
 use anyhow::Result;
-use coomi_telemetry::Telemetry;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
@@ -189,20 +188,8 @@ impl CatalogInstaller {
     }
 
     /// 安装核心：下载 zip → 解压 subdir → 复制到 skills/{id} → 写元数据。
-    /// 内置目录与社区市场共用此函数，埋点也集中在这里——无论用户手动点击
-    /// 还是 Agent 自动安装，install_ok / install_fail 都在此处产生。
     fn install_entry(&self, entry: &SkillEntry, replace: bool) -> Result<PathBuf> {
-        let result = self.install_entry_inner(entry, replace);
-        let telemetry = Telemetry::new(&self.home);
-        match &result {
-            Ok(_) => {
-                let _ = telemetry.record("install_ok", &entry.id);
-            }
-            Err(_) => {
-                let _ = telemetry.record("install_fail", &entry.id);
-            }
-        }
-        result
+        self.install_entry_inner(entry, replace)
     }
 
     fn install_entry_inner(&self, entry: &SkillEntry, replace: bool) -> Result<PathBuf> {
